@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <ncurses.h>
+#include <form.h>
 
 int bdash_cd(char **args);
 int bdash_help(char **args);
@@ -11,6 +12,7 @@ int bdash_exit(char **args);
 
 WINDOW *prompt;
 WINDOW *result;
+WINDOW *result_frame;
 
 
 char *builtin_str[] = {
@@ -31,7 +33,7 @@ int num_builtins(){
 
 int bdash_cd(char **args){
     if (args[1] == NULL){
-        fprintf(stderr, "B-dash: expected argument to \"cd\"\n");
+        wprintw(result, "B-dash: expected argument to \"cd\"\n");
     }else{
         if (chdir(args[1]) != 0){
             perror("B-dash");
@@ -48,13 +50,13 @@ int bdash_help(char **args){
     wprintw(result, "Dagechan's B-dash\n");
     wprintw(result, "Type program names and arguments, and hit enter.\n");
     wprintw(result, "The following are built in: \n");
+    wrefresh(result);
 
     for (i = 0; i < num_builtins(); i++){
-        printf(" %s\n", builtin_str[i]);
+        wprintw(result, " %s\n", builtin_str[i]);
     }
 
     wprintw(result, "Use the man command for information on other programs.\n");
-
     return 1;
 }
 
@@ -65,6 +67,7 @@ int bdash_exit(char **args){
 int launch(char **args) {
     pid_t pid, wpid;
     int status;
+
 
     // 一時的なファイルを作成
     char tmp_filename[] = "/tmp/shell_outputXXXXXX";
@@ -136,7 +139,7 @@ char **split_line(char* line){
 
     //mallocでのメモリ割り当てが失敗した場合の処理
     if(!tokens){
-        fprintf(stderr, "B-dash: allocation error\n");
+        wprintw(result, "B-dash: allocation error\n");
         exit(EXIT_FAILURE);
     }
     token = strtok(line, TOKEN_DELIM);
@@ -148,7 +151,7 @@ char **split_line(char* line){
             bufsize += TOKEN_BUFSIZE;
             tokens = realloc(tokens, bufsize * sizeof(char *));
             if (!tokens){
-                fprintf(stderr, "B-dash: allocation error\n");
+                wprintw(result, "B-dash: allocation error\n");
                 exit(EXIT_FAILURE);
             }
         }
@@ -173,6 +176,7 @@ char *read_line(void){
                 input[--index] = '\0';
                 wprintw(prompt, "\b \b"); // BackSpace文字を出力したカーソル移動
                 wrefresh(prompt);
+                
             }
         }else{
             input[index++] = ch;
@@ -195,17 +199,22 @@ void bdash_loop(void){
     char **args;
     int status;
     
-    prompt = newwin(3, 50, 27, 10);
-    result = newwin(25, 50, 2, 10);
+    // newwin(height, width, Y, X)
+    prompt = newwin(3, 70, 27, 10);
+    result_frame = newwin(25, 70, 2, 10);
+    result = newwin(23, 68, 3, 11);
 
     //doはwhile条件不満足でも必ず1回は実行
     do{
         // printw("(`・ω・´)☞ >>"); //顔文字prompt
-        box(result, 0, 0);
+        box(result_frame, 0, 0);
         box(prompt, 0, 0);
+        overlay(result, result_frame);
         mvwprintw(prompt, 1, 1, ">> ");
         mvwprintw(prompt, 0, 0, "PROMPT");
-        mvwprintw(result, 0, 1, "RESULT");
+        mvwprintw(result_frame, 0, 1, "RESULT");
+        // wprintw(result, "hello");
+        wrefresh(result_frame);
         wrefresh(result);
         wrefresh(prompt); //refreshでprompt表示
         refresh();
@@ -214,6 +223,7 @@ void bdash_loop(void){
 
         line = read_line();
         args = split_line(line);
+        wclear(result);
 
         FILE *old_stdout = stdout;
         stdout = fopen("/dev/tty", "w");
