@@ -9,6 +9,9 @@ int bdash_cd(char **args);
 int bdash_help(char **args);
 int bdash_exit(char **args);
 
+WINDOW *prompt;
+WINDOW *result;
+
 
 char *builtin_str[] = {
     "cd",
@@ -42,15 +45,15 @@ int bdash_cd(char **args){
 
 int bdash_help(char **args){
     int i;
-    printw("Dagechan's B-dash\n");
-    printw("Type program names and arguments, and hit enter.\n");
-    printw("The following are built in: \n");
+    wprintw(result, "Dagechan's B-dash\n");
+    wprintw(result, "Type program names and arguments, and hit enter.\n");
+    wprintw(result, "The following are built in: \n");
 
     for (i = 0; i < num_builtins(); i++){
         printf(" %s\n", builtin_str[i]);
     }
 
-    printw("Use the man command for information on other programs.\n");
+    wprintw(result, "Use the man command for information on other programs.\n");
 
     return 1;
 }
@@ -59,25 +62,53 @@ int bdash_exit(char **args){
     return 0;
 }
 
-int launch(char **args){
+int launch(char **args) {
     pid_t pid, wpid;
     int status;
 
+    // 一時的なファイルを作成
+    char tmp_filename[] = "/tmp/shell_outputXXXXXX";
+    int tmp_fd = mkstemp(tmp_filename);
+    if (tmp_fd == -1) {
+        perror("B-dash");
+        return 1;
+    }
+
     pid = fork(); //子プロセス生成
-    if (pid == 0){
-        if (execvp(args[0], args) == -1){
+    if (pid == 0) {
+        // 子プロセス内で標準出力を一時的なファイルにリダイレクト
+        dup2(tmp_fd, STDOUT_FILENO);
+        close(tmp_fd);
+
+        if (execvp(args[0], args) == -1) {
             perror("B-dash");
         }
         exit(EXIT_FAILURE);
-    }else if (pid < 0){
+    } else if (pid < 0) {
         perror("B-dash");
-    }else{
-        do{
+    } else {
+        do {
             wpid = waitpid(pid, &status, WUNTRACED);
-        }while(!WIFEXITED(status) && !WIFSIGNALED(status));
+        } while (!WIFEXITED(status) && !WIFSIGNALED(status));
     }
+
+    // 一時的なファイルの内容を読み取り、resultウィンドウに表示
+    FILE *tmp_file = fopen(tmp_filename, "r");
+    if (tmp_file == NULL) {
+        perror("B-dash");
+        return 1;
+    }
+    char line[100];
+    while (fgets(line, sizeof(line), tmp_file) != NULL) {
+        wprintw(result, "%s", line);
+    }
+    fclose(tmp_file);
+    unlink(tmp_filename); // 一時的なファイルを削除
+
     return 1;
 }
+
+
 
 int exe(char **args){
     int i;
@@ -127,13 +158,6 @@ char **split_line(char* line){
     return tokens;
 }
 
-
-// char *read_line(void){
-//     char *line = NULL; //文字列のポインタ
-//     ssize_t bufsize = 0; //ssize_tはobjサイズをバイト数＆負数エラー対応
-//     getline(&line, &bufsize, stdin); //標準入力(stdin)から行を読み
-//     return line;
-// }
 #define MAX_INPUT_LENGTH 100
 
 char *read_line(void){
@@ -147,8 +171,8 @@ char *read_line(void){
         if(ch == KEY_BACKSPACE || ch == 127){
             if(index > 0){
                 input[--index] = '\0';
-                printw("\b \b"); // BackSpace文字を出力したカーソル移動
-                refresh();
+                wprintw(prompt, "\b \b"); // BackSpace文字を出力したカーソル移動
+                wrefresh(prompt);
             }
         }else{
             input[index++] = ch;
@@ -158,8 +182,8 @@ char *read_line(void){
 
     char *line = malloc((strlen(input) + 1) * sizeof(char));
     strcpy(line, input);
-    printw("\n");
-    refresh();
+    wprintw(prompt, "\n");
+    wrefresh(prompt);
     return line;
 }
 
@@ -171,27 +195,37 @@ void bdash_loop(void){
     char **args;
     int status;
     
-    WINDOW *result = newwin(15, 10, 2, 10);
-    WINDOW *prompt = newwin(2, 10, 2, 100);
-    initscr();
-
-    box()
-
+    prompt = newwin(3, 50, 27, 10);
+    result = newwin(25, 50, 2, 10);
 
     //doはwhile条件不満足でも必ず1回は実行
     do{
         // printw("(`・ω・´)☞ >>"); //顔文字prompt
-        mvwprintw(prompt, 0, 0, ">>");
+        box(result, 0, 0);
+        box(prompt, 0, 0);
+        mvwprintw(prompt, 1, 1, ">> ");
+        mvwprintw(prompt, 0, 0, "PROMPT");
+        mvwprintw(result, 0, 1, "RESULT");
+        wrefresh(result);
         wrefresh(prompt); //refreshでprompt表示
+        refresh();
+
+        move(28, 14); //move(Y, X)
 
         line = read_line();
         args = split_line(line);
+
+        FILE *old_stdout = stdout;
+        stdout = fopen("/dev/tty", "w");
         status = exe(args);
+        fclose(stdout);
+        stdout = old_stdout;
 
         free(line);
         free(args);
 
-        printw("\n");
+        wprintw(result, "\n");
+        wrefresh(result);
 
 
     } while (status);
@@ -200,42 +234,13 @@ void bdash_loop(void){
     endwin(); //ncursesの終了
 }
 
-// void window(){
-//     initscr(); //ncursesの初期化
-//     start_color();
-//     init_pair(1, COLOR_WHITE, COLOR_BLUE);
-
-//     int height, width;
-//     getmaxyx(stdscr, height, width);
-
-//     int box1_h = height - 7;
-//     int box1_w = width - 6;
-
-//     int box2_h = height - 100;
-//     int box2_w = width -6;
-
-//     // ボックスの枠を描画
-//     box(stderr, '|', '-')
-
-//     bkgd(' ' |COLOR_PAIR(1));
-//     refresh();
-
-
-// }
-
-// #define box_height 5
-// #define box_width 8
-
-
-
-
-
-
 
 
 int main(int argc, char *argv[]){
+    initscr();
+    crmode();
 
-
+    refresh();
     //自作shell "B-dash" を終了まで起動するためのループ
     bdash_loop();
     
