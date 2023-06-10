@@ -200,9 +200,9 @@ void bdash_loop(void){
     int status;
     
     // newwin(height, width, Y, X)
-    prompt = newwin(3, 70, 27, 10);
-    result_frame = newwin(25, 70, 2, 10);
-    result = newwin(23, 68, 3, 11);
+    prompt = newwin(3, 130, 27, 10);
+    result_frame = newwin(25, 130, 2, 10);
+    result = newwin(23, 128, 3, 11);
 
     //doはwhile条件不満足でも必ず1回は実行
     do{
@@ -223,18 +223,25 @@ void bdash_loop(void){
 
         line = read_line();
         args = split_line(line);
-        wclear(result);
+
+        wmove(result, 0, 0);
+	wclrtoeol(result);
+
+	wrefresh(result);
 
         FILE *old_stdout = stdout;
         stdout = fopen("/dev/tty", "w");
         status = exe(args);
         fclose(stdout);
         stdout = old_stdout;
+	
 
+	
         free(line);
         free(args);
 
         wprintw(result, "\n");
+	wmove(result, 0, 0);
         wrefresh(result);
 
 
