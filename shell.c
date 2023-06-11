@@ -12,7 +12,6 @@ int bdash_exit(char **args);
 
 WINDOW *prompt;
 WINDOW *result;
-WINDOW *result_frame;
 
 
 char *builtin_str[] = {
@@ -33,6 +32,7 @@ int num_builtins(){
 
 int bdash_cd(char **args){
     if (args[1] == NULL){
+	wmove(result, 1, 1);
         wprintw(result, "B-dash: expected argument to \"cd\"\n");
     }else{
         if (chdir(args[1]) != 0){
@@ -47,15 +47,19 @@ int bdash_cd(char **args){
 
 int bdash_help(char **args){
     int i;
+    wmove(result, 1, 1);
     wprintw(result, "Dagechan's B-dash\n");
+    wmove(result, 2, 1);
     wprintw(result, "Type program names and arguments, and hit enter.\n");
+    wmove(result, 3, 1);
     wprintw(result, "The following are built in: \n");
     wrefresh(result);
 
     for (i = 0; i < num_builtins(); i++){
+	wmove(result, 4+i, 1);
         wprintw(result, " %s\n", builtin_str[i]);
     }
-
+    wmove(result, 7, 1);
     wprintw(result, "Use the man command for information on other programs.\n");
     return 1;
 }
@@ -102,6 +106,7 @@ int launch(char **args) {
         return 1;
     }
     char line[100];
+    wmove(result, 1, 1);
     while (fgets(line, sizeof(line), tmp_file) != NULL) {
         wprintw(result, "%s", line);
     }
@@ -120,6 +125,10 @@ int exe(char **args){
         return 1;
     }
 
+    // clear used result
+    wclear(result);
+    wrefresh(result);
+
     for (i = 0; i < num_builtins(); i++){
         if (strcmp(args[0], builtin_str[i]) == 0){
             return (*builtin_func[i])(args);
@@ -137,6 +146,7 @@ char **split_line(char* line){
     char **tokens = malloc(bufsize * sizeof(char *));
     char *token;
 
+    wmove(result, 1, 1);
     //mallocでのメモリ割り当てが失敗した場合の処理
     if(!tokens){
         wprintw(result, "B-dash: allocation error\n");
@@ -167,7 +177,8 @@ char *read_line(void){
     //cbreak(); //行バッファリングの無効化
     char input[MAX_INPUT_LENGTH]; 
     memset(input, 0, sizeof(input));//バッファの初期化
-
+    
+    wmove(result, 1, 1);
     int ch;
     int index = 0;
     while ((ch = getch()) != '\n' && index < MAX_INPUT_LENGTH - 1){
@@ -191,67 +202,59 @@ char *read_line(void){
     return line;
 }
 
+void make_win(void){
+    box(result, 0, 0);
+    box(prompt, 0, 0);
+    //overlay(result, result_frame);
+    mvwprintw(prompt, 1, 1, ">> ");
+    mvwprintw(prompt, 0, 0, "PROMPT");
+    mvwprintw(result, 0, 1, "RESULT");
+    wmove(result, 1, 1);
+    //wprintw(result, "hello");
+  
+
+    
+    wrefresh(result);
+    wrefresh(prompt);
+    refresh();
+    move(28, 14);
+}
 
 
-void bdash_loop(void){
 
+void bdash_loop(void) {
     char *line;
     char **args;
     int status;
     
-    // newwin(height, width, Y, X)
     prompt = newwin(3, 130, 27, 10);
-    result_frame = newwin(25, 130, 2, 10);
-    result = newwin(23, 128, 3, 11);
+    result = newwin(25, 130, 2, 10);
 
-    //doはwhile条件不満足でも必ず1回は実行
-    do{
-        // printw("(`・ω・´)☞ >>"); //顔文字prompt
-        box(result_frame, 0, 0);
-        box(prompt, 0, 0);
-        overlay(result, result_frame);
-        mvwprintw(prompt, 1, 1, ">> ");
-        mvwprintw(prompt, 0, 0, "PROMPT");
-        mvwprintw(result_frame, 0, 1, "RESULT");
-        // wprintw(result, "hello");
-        wrefresh(result_frame);
-        wrefresh(result);
-        wrefresh(prompt); //refreshでprompt表示
-        refresh();
-
-        move(28, 14); //move(Y, X)
+    do {
+        make_win();
 
         line = read_line();
         args = split_line(line);
 
-        wmove(result, 0, 0);
-	wclrtoeol(result);
-
+	clear();
+	wclear(result);
+	make_win();
+	refresh();
 	wrefresh(result);
 
-        FILE *old_stdout = stdout;
-        stdout = fopen("/dev/tty", "w");
+        // Execute command and display result
         status = exe(args);
-        fclose(stdout);
-        stdout = old_stdout;
-	
-
-	
+        
         free(line);
         free(args);
 
-        wprintw(result, "\n");
-	wmove(result, 0, 0);
+        wmove(result, 0, 0);  // Move cursor to the beginning of result window
         wrefresh(result);
-
 
     } while (status);
     
     refresh();
-    endwin(); //ncursesの終了
 }
-
-
 
 int main(int argc, char *argv[]){
     initscr();
@@ -260,6 +263,7 @@ int main(int argc, char *argv[]){
     refresh();
     //自作shell "B-dash" を終了まで起動するためのループ
     bdash_loop();
+    endwin(); //ncursesの終了
     
 
     return EXIT_SUCCESS;
