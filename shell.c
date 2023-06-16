@@ -9,9 +9,11 @@
 int bdash_cd(char **args);
 int bdash_help(char **args);
 int bdash_exit(char **args);
+int y, x;
 
 WINDOW *prompt;
 WINDOW *result;
+WINDOW *directory;
 
 
 char *builtin_str[] = {
@@ -30,19 +32,50 @@ int num_builtins(){
     return sizeof(builtin_str) / sizeof(char *);
 }
 
+// int bdash_cd(char **args){
+//     if (args[1] == NULL){
+// 	wmove(result, 1, 1);
+//         wprintw(result, "B-dash: expected argument to \"cd\"\n");
+//     }else{
+//         if (chdir(args[1]) != 0){
+// 	    wmove(result, 1, 1);
+//             wprintw(result, "B-dash: cannot change drectory\n");
+//         } else {
+// 	    // ディレクトリが正常に変更された場合，プロンプトにも反映
+// 	    wmove(prompt, 1, 4);
+// 	    wprintw(prompt, "%s", getcwd(NULL, 0));
+// 	    wclrtoeol(prompt);
+//             //return 0; //成功したら0返す
+//         }
+//     }
+
+//     return 1; //失敗したら1返す
+// }
+
 int bdash_cd(char **args){
     if (args[1] == NULL){
-	wmove(result, 1, 1);
-        wprintw(result, "B-dash: expected argument to \"cd\"\n");
+        // 引数がない場合はホームディレクトリに移動
+        if (chdir(getenv("HOME")) != 0){
+            wmove(result, 1, 1);
+            wprintw(result, "B-dash: cannot change directory\n");
+        }else{
+            // ディレクトリが正常に変更された場合、プロンプトにも反映させる
+            wmove(prompt, 1, 4);
+            wprintw(prompt, "%s", getcwd(NULL, 0));
+            wclrtoeol(prompt);
+        }
     }else{
         if (chdir(args[1]) != 0){
-            perror("B-dash");
-        } else {
-            return 0; //成功したら0返す
+            wmove(result, 1, 1);
+            wprintw(result, "B-dash: cannot change directory\n");
+        }else{
+            // ディレクトリが正常に変更された場合、プロンプトにも反映させる
+            wmove(directory, 1, 4);
+            wprintw(directory, "%s", getcwd(NULL, 0));
+            wclrtoeol(directory);
         }
     }
-
-    return 1; //失敗したら1返す
+    return 1;
 }
 
 int bdash_help(char **args){
@@ -68,9 +101,11 @@ int bdash_exit(char **args){
     return 0;
 }
 
+
 int launch(char **args) {
     pid_t pid, wpid;
     int status;
+    int wx, wy;
 
 
     // 一時的なファイルを作成
@@ -88,11 +123,13 @@ int launch(char **args) {
         close(tmp_fd);
 
         if (execvp(args[0], args) == -1) {
-            perror("B-dash");
+            mvwprintw(result, 1, 1, "B-dash: command not found: %s\n",args[0]);
+            //perror("B-dash");
+            wrefresh(result);
         }
         exit(EXIT_FAILURE);
     } else if (pid < 0) {
-        perror("B-dash");
+        mvwprintw(result, 1, 1, "B-dash: command not found: %s\n",args[0]);
     } else {
         do {
             wpid = waitpid(pid, &status, WUNTRACED);
@@ -106,8 +143,9 @@ int launch(char **args) {
         return 1;
     }
     char line[100];
-    wmove(result, 1, 1);
     while (fgets(line, sizeof(line), tmp_file) != NULL) {
+	getyx(result, wy, wx);
+	wmove(result, wy, wx+1);
         wprintw(result, "%s", line);
     }
     fclose(tmp_file);
@@ -181,8 +219,9 @@ char *read_line(void){
     wmove(result, 1, 1);
     int ch;
     int index = 0;
+    int prompt_y = getcury(prompt);
     while ((ch = getch()) != '\n' && index < MAX_INPUT_LENGTH - 1){
-        if(ch == KEY_BACKSPACE || ch == 127){
+        if(ch == KEY_BACKSPACE || ch == KEY_DC || ch == 127){
             if(index > 0){
                 input[--index] = '\0';
                 wprintw(prompt, "\b \b"); // BackSpace文字を出力したカーソル移動
@@ -192,6 +231,7 @@ char *read_line(void){
         }else{
             input[index++] = ch;
         }
+        wmove(prompt, prompt_y, 4);
 
     }
 
@@ -203,21 +243,36 @@ char *read_line(void){
 }
 
 void make_win(void){
+    use_default_colors();
+    start_color();
+    init_pair(1, COLOR_WHITE, COLOR_BLUE);
+    init_pair(2, COLOR_BLACK, COLOR_CYAN);
+    init_pair(3, COLOR_WHITE, COLOR_MAGENTA);
+    init_pair(4, COLOR_BLACK, COLOR_YELLOW+8);
+
+    bkgd(COLOR_PAIR(4));
+    refresh();
+    wbkgd(result, COLOR_PAIR(1));
+    wbkgd(prompt, COLOR_PAIR(1));
+    wbkgd(directory, COLOR_PAIR(1)); 
+    wrefresh(result);
+
+    scrollok(result, TRUE); //permit scrolling
     box(result, 0, 0);
     box(prompt, 0, 0);
+    box(directory, 0, 0);
     //overlay(result, result_frame);
     mvwprintw(prompt, 1, 1, ">> ");
-    mvwprintw(prompt, 0, 0, "PROMPT");
+    mvwprintw(prompt, 0, 1, "PROMPT");
     mvwprintw(result, 0, 1, "RESULT");
+    mvwprintw(directory, 0, 1, "CURRENT DIRECTORY");
     wmove(result, 1, 1);
     //wprintw(result, "hello");
-  
-
-    
     wrefresh(result);
     wrefresh(prompt);
+    wrefresh(directory);
     refresh();
-    move(28, 14);
+    move(32, x/6 + 4);
 }
 
 
@@ -226,9 +281,11 @@ void bdash_loop(void) {
     char *line;
     char **args;
     int status;
-    
-    prompt = newwin(3, 130, 27, 10);
-    result = newwin(25, 130, 2, 10);
+   
+    //height, width, Y, X
+    prompt = newwin(3, 100, 31, x/6);
+    result = newwin(25, 100, 2, x/6);
+    directory = newwin(3, 50, 28, x/6);
 
     do {
         make_win();
@@ -236,11 +293,11 @@ void bdash_loop(void) {
         line = read_line();
         args = split_line(line);
 
-	clear();
-	wclear(result);
-	make_win();
-	refresh();
-	wrefresh(result);
+        clear();
+        wclear(result);
+        make_win();
+        refresh();
+        wrefresh(result);
 
         // Execute command and display result
         status = exe(args);
@@ -259,6 +316,8 @@ void bdash_loop(void) {
 int main(int argc, char *argv[]){
     initscr();
     crmode();
+    getmaxyx(stdscr, y, x);
+    keypad(stdscr, TRUE); 
 
     refresh();
     //自作shell "B-dash" を終了まで起動するためのループ
